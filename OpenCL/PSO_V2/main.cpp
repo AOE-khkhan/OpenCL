@@ -2,6 +2,15 @@
 #include <stdlib.h>
 #include <iostream>
 #include <Eigen/Dense>
+#include <vector>
+#include <cstdio>
+#include <cstdlib>
+#include <string>
+#include <time.h>
+#include <ctime>
+#include <iostream>
+#include <fstream>
+
 
 #ifdef __APPLE__
 #include <OpenCL/opencl.h>
@@ -15,33 +24,16 @@ using namespace std;
 using namespace Eigen;
 
 
-#define __CL_ENABLE_EXCEPTIONS
-
-#include "cl.hpp"
-
-#include "util.hpp" // utility library
-
-#include "err_code.h"
-
-#include <vector>
-#include <cstdio>
-#include <cstdlib>
-#include <string>
-#include <time.h>
-#include <ctime>
-#include <iostream>
-#include <fstream>
-
 
 
 int main()
 {	
 	//  Start Timers
-	
+	clock_t begin = clock();
 	//Algorithm parameters
 	int variableRange = 30;
 	int numberOfVariables = 2;
-	int numberOfParticles = pow(2,12);
+	int numberOfParticles = pow(2,15);
 	int alpha = 2;
 	int size = numberOfVariables*numberOfParticles;
 	float *inertia = (float *)malloc(sizeof(float));
@@ -50,8 +42,11 @@ int main()
 	float beta=0.99;
 	float maximumVelocity = 5;
 	
+	// Initialize random seed
 	srand(time(NULL)); rand();
-	// Intialize particles
+	
+	// TODO: NOT USE EIGEN TO INITIALIZE PARAMETERS
+	// Intialize particle parameters and other stuff needed for the algorithm
 	MatrixXf particlePositions = -variableRange*MatrixXf::Ones(numberOfVariables,numberOfParticles)+ 
 					2*variableRange*(MatrixXf::Ones(numberOfVariables,numberOfParticles)+(MatrixXf::Random(numberOfVariables,numberOfParticles)))/2.0;
 	MatrixXf particleVelocities = alpha*(-variableRange*MatrixXf::Ones(numberOfVariables,numberOfParticles)+ 
@@ -67,10 +62,7 @@ int main()
 	MatrixXf c(1,2); c << 2, 2;
 	VectorXi indexHolder = VectorXi::LinSpaced(numberOfParticles,0,numberOfParticles-1);
 	
-	
-	
-	
-    // Load the kernel source code into the array source_str
+	// Load the kernel source code into the array source_str
     FILE *fp;
     char *source_str;
     size_t source_size;
@@ -83,7 +75,8 @@ int main()
     source_str = (char*)malloc(MAX_SOURCE_SIZE);
     source_size = fread( source_str, 1, MAX_SOURCE_SIZE, fp);
     fclose( fp );
-		
+	
+	// TODO: AVOID USING EIGEN?	
 	// Variables to hold all of the stuff:
 	float *positions = (float*)malloc(sizeof(float)*size);
 	Map<MatrixXf>(positions,numberOfVariables,numberOfParticles) = particlePositions;
@@ -116,9 +109,6 @@ int main()
 	Map<VectorXi>(index,numberOfParticles) = indexHolder;
 
 
-
-
-
     // Get platform and device information
     cl_platform_id platform_id = NULL;
     cl_device_id device_id = NULL;   
@@ -146,8 +136,6 @@ int main()
 	cl_kernel reduce = clCreateKernel(program, "reduce", &ret);
     cl_kernel updateVelocities = clCreateKernel(program, "UpdateVelocities", &ret);
 	
-
-
 
 	// Create cl_mem objects
 	cl_mem positionsObj = clCreateBuffer(context, CL_MEM_READ_WRITE, sizeof(float)*size, NULL, &ret);
@@ -208,9 +196,9 @@ int main()
 	
     // Execute the OpenCL kernel on the list
     size_t global_item_size[] = {(size_t)size,(size_t)size,(size_t)size};// = size; // Process the entire lists
-    size_t local_item_size[] = {1, 32, 1};// = 32; // Divide work items into groups of 64
+    size_t local_item_size[] = {1, 32, 1};
 	
-	clock_t begin = clock();
+	
 	
 	for(int i=0;i<125;i++)
 	{
@@ -222,12 +210,8 @@ int main()
 		ret = clEnqueueNDRangeKernel(command_queue, updateVelocities, 1, NULL, &global_item_size[2], &local_item_size[2], 0, NULL, NULL);
 		
 		
-		randArray1 = (MatrixXf::Ones(numberOfVariables,numberOfParticles)+MatrixXf::Random(numberOfVariables,numberOfParticles))/2.0;
-		randArray2 = (MatrixXf::Ones(numberOfVariables,numberOfParticles)+MatrixXf::Random(numberOfVariables,numberOfParticles))/2.0;
-		Map<MatrixXf>(rand1,numberOfVariables,numberOfParticles) = randArray1;
-		Map<MatrixXf>(rand2,numberOfVariables,numberOfParticles) = randArray2;
-		ret = clEnqueueWriteBuffer(command_queue, rand1Obj, CL_TRUE, 0,size * sizeof(float), rand1, 0, NULL, NULL);
-		ret = clEnqueueWriteBuffer(command_queue, rand2Obj, CL_TRUE, 0,size * sizeof(float), rand2, 0, NULL, NULL);
+		// Rinse and repeat
+		// TODO: INCLUDE UPDATE OF THE RANDOM MATRICES. CODE WORKS STILL THOUGH. PERHAPS THROUGH GPU. CALLS TO CPU -> GPU EXPENSIVE
 		
 	
 	}
@@ -235,8 +219,6 @@ int main()
 	ret = clEnqueueReadBuffer(command_queue, globalBestValuesObj, CL_TRUE, 0,sizeof(float), globalBestValues, 0, NULL, NULL);
 	cout<<"best score :"<<globalBestValues[0]<<endl;
 	
-	
-
 	float timeTaken = (float)(clock()-begin) / CLOCKS_PER_SEC;			
 	cout<<"Time taken: "<<timeTaken<<endl;
 	
